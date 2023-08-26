@@ -10,6 +10,12 @@ from gensim import downloader
 from matplotlib import pyplot
 from nltk.corpus import wordnet
 
+### all
+all_values = {
+              'matches' : dict(), 
+              'mismatches' : dict(),
+              }
+
 ### read norms
 
 folder = 'norms'
@@ -20,28 +26,32 @@ pos = dict()
 for f in os.listdir(folder):
     counter = 0
     if 'Concreteness' in f:
-        key = 'concreteness'
-        rel_idxs = [0, 2]
+        keys = ['concreteness']
+        all_rel_idxs = [[0, 2]]
     elif 'AoA' in f:
-        key = 'AoA'
-        rel_idxs = [0, 3]
-    else:
-        continue
-    norms[key] = dict()
-    with open(os.path.join(folder, f), errors='ignore') as i:
-        for l in i:
-            if counter == 0:
-                counter += 1
-                continue
-            line = l.strip().split('\t')
-            if len(line) < 3:
-                continue
-            try:
-                norms[key][line[rel_idxs[0]]] = float(line[rel_idxs[1]])
-            except ValueError:
-                continue
-            if key == 'concreteness':
-                pos[line[0]] = line[-1]
+        keys = ['AoA']
+        all_rel_idxs = [[0, 3]]
+    elif 'PoS' in f:
+        keys = ['log10_contextual_diversity', 'log10_freq']
+        all_rel_idxs = [[0, 8], [0, 6]]
+    
+    for key, rel_idxs in zip(keys, all_rel_idxs):
+    
+        norms[key] = dict()
+        with open(os.path.join(folder, f), errors='ignore') as i:
+            for l in i:
+                if counter == 0:
+                    counter += 1
+                    continue
+                line = l.strip().split('\t')
+                if len(line) < 3:
+                    continue
+                try:
+                    norms[key][line[rel_idxs[0]]] = float(line[rel_idxs[1]])
+                except ValueError:
+                    continue
+                if key == 'concreteness':
+                    pos[line[0]] = line[-1]
 
 ### read wilson & al data
 
@@ -102,11 +112,13 @@ for k, tuples in couples_dict.items():
             values.append(diff)
         print('avg difference in {} for {}: {}'.format(key, k, numpy.average(values)))
         print('std of differences in {} for {}: {}'.format(key, k, numpy.std(values)))
+        all_values[k]['difference_ in {}'.format(key)] = values
     ### similarities
     ### w2v
     print('\n')
     w2v_sims = [wv.similarity(tup[0], tup[1]) for tup in tuples]
     print('avg w2v similarity for {}: {}'.format(k, numpy.average(w2v_sims)))
+    all_values[k]['word2vec_distance'] = [1-s for s in w2v_sims]
     print('std of w2v similarity for {}: {}'.format(k, numpy.std(w2v_sims)))
     ### wordnet
     wn_sims = list()
@@ -128,7 +140,84 @@ for k, tuples in couples_dict.items():
             sim = wordnet.wup_similarity(c[0], c[1])
             tup_sims.append(sim)
         wn_sims.append(numpy.average(tup_sims))
+    all_values[k]['wordnet_distance'] = [1-s for s in wn_sims]
+    all_values[k]['difference_in number_of wordnet_senses'] = diff_senses
     print('avg wordnet similarity for {}: {}'.format(k, numpy.average(wn_sims)))
     print('std of wordnet similarity for {}: {}'.format(k, numpy.std(wn_sims)))
     print('avg differences in senses for {}: {}'.format(k, numpy.average(diff_senses)))
     print('std of differences in senses for {}: {}'.format(k, numpy.std(diff_senses)))
+
+### standardizing
+keys = list(all_values[k].keys())
+parameters_est = {k : [val for v in all_values.values() for val_key, vals in v.items() for val in vals if val_key==k] for k in keys}
+parameters = {k : [numpy.average(v), numpy.std(v)] for k, v in parameters_est.items()}
+z_scores = {k : {k_two : list() for k_two in v.keys()} for k, v in all_values.items()}
+for k, v in all_values.items():
+    for k_two, v_two in v.items():
+        vals = [(score - parameters[k_two][0])/parameters[k_two][1] for score in v_two]
+        z_scores[k][k_two] = vals
+### now plotting
+plot_folder = 'plots'
+os.makedirs(plot_folder, exist_ok=True)
+out_file = os.path.join(plot_folder, 'analysis_stimuli_wilson.jpg')
+fig, ax = pyplot.subplots(figsize=(22, 10), constrained_layout=True)
+
+matched = [(var, var_data) for var, var_data in z_scores['matches'].items()]
+mismatched = [(var, var_data) for var, var_data in z_scores['mismatches'].items()]
+assert [v[0] for v in matched] == [v[0] for v in mismatched]
+xs = [v[0] for v in matched]
+matched = [v[1] for v in matched]
+mismatched = [v[1] for v in mismatched]
+v1 = ax.violinplot(matched, 
+                       #points=100, 
+                       positions=range(len(xs)),
+                       showmeans=True, 
+                       showextrema=False, 
+                       showmedians=False,
+                       )
+for b in v1['bodies']:
+    # get the center
+    m = numpy.mean(b.get_paths()[0].vertices[:, 0])
+    # modify the paths to not go further right than the center
+    b.get_paths()[0].vertices[:, 0] = numpy.clip(b.get_paths()[0].vertices[:, 0], -numpy.inf, m)
+    b.set_color('darkorange')
+v1['cmeans'].set_color('darkorange')
+v2 = ax.violinplot(mismatched, 
+                       #points=100, 
+                       positions=range(len(xs)),
+                       showmeans=True, 
+                       showextrema=False, 
+                       showmedians=False,
+                       )
+for b in v2['bodies']:
+    # get the center
+    m = numpy.mean(b.get_paths()[0].vertices[:, 0])
+    # modify the paths to not go further right than the center
+    b.get_paths()[0].vertices[:, 0] = numpy.clip(b.get_paths()[0].vertices[:, 0], m, numpy.inf)
+    b.set_color('teal')
+v2['cmeans'].set_color('teal')
+ax.legend(
+          [v1['bodies'][0], v2['bodies'][0]],
+          ['matches', 'mismatches'],
+          fontsize=20
+          )
+ax.set_xticks(range(len(xs)))
+ax.set_xticklabels(
+                    [x.replace('_', '\n') for x in xs], 
+                    fontsize=23, 
+                    fontweight='bold',
+                    )
+pyplot.yticks(fontsize=15)
+ax.set_ylabel(
+              'Standardized value', 
+              fontsize=20, 
+              fontweight='bold',
+              labelpad=20
+              )
+ax.set_title(
+             'Values',
+             pad=20,
+             fontweight='bold',
+             fontsize=25,
+             )
+pyplot.savefig(out_file)
