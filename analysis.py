@@ -19,8 +19,9 @@ all_values = {
 ### read norms
 
 folder = 'norms'
-assert len(os.listdir(folder)) == 3
+assert len(os.listdir(folder)) == 4
 norms = dict()
+associations = dict()
 pos = dict()
 
 for f in os.listdir(folder):
@@ -34,6 +35,9 @@ for f in os.listdir(folder):
     elif 'PoS' in f:
         keys = ['log10_contextual_diversity', 'log10_freq']
         all_rel_idxs = [[0, 8], [0, 6]]
+    elif 'strength' in f:
+        keys = ['associative_strength']
+        all_rel_idxs = [[0, 1, -1]]
     
     for key, rel_idxs in zip(keys, all_rel_idxs):
     
@@ -46,12 +50,16 @@ for f in os.listdir(folder):
                 line = l.strip().split('\t')
                 if len(line) < 3:
                     continue
-                try:
-                    norms[key][line[rel_idxs[0]]] = float(line[rel_idxs[1]])
-                except ValueError:
-                    continue
-                if key == 'concreteness':
-                    pos[line[0]] = line[-1]
+                if key == 'associative_strength':
+                    associations[(line[0], line[1])] = float(line[-1])
+                else:
+                    try:
+                        norms[key][line[rel_idxs[0]]] = float(line[rel_idxs[1]])
+                    except ValueError:
+                        continue
+                    if key == 'concreteness':
+                        pos[line[0]] = line[-1]
+del norms['associative_strength']
 
 ### read wilson & al data
 
@@ -86,7 +94,6 @@ words_per_cat = {k : set([w for case in lst for w in case[:2]]) for k, lst in co
 
 ### loading w2v
 wv = gensim.downloader.load('word2vec-google-news-300')
-#sims_per_cat = {k : [wv.similarity(case[0], case[1]) for case in lst] for k, lst in couples_dict.items()}
 
 ### printouts!
 
@@ -120,6 +127,12 @@ for k, tuples in couples_dict.items():
     print('avg w2v similarity for {}: {}'.format(k, numpy.average(w2v_sims)))
     all_values[k]['word2vec_distance'] = [1-s for s in w2v_sims]
     print('std of w2v similarity for {}: {}'.format(k, numpy.std(w2v_sims)))
+    ### associations
+    assos = [associations[tuple(tup[:2])] for tup in tuples if tuple(tup[:2]) in associations.keys()]
+    print('avg word association for {}: {}'.format(k, numpy.average(assos)))
+    all_values[k]['word_association_distance'] = [1-s for s in assos]
+    print('std of word association for {}: {}'.format(k, numpy.std(assos)))
+    
     ### wordnet
     wn_sims = list()
     diff_senses = list()
