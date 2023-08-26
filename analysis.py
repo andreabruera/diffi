@@ -4,23 +4,58 @@ import matplotlib
 import nltk
 import numpy
 import os
+import re
 import sklearn
 
 from gensim import downloader
 from matplotlib import pyplot
 from nltk.corpus import wordnet
 
+### read the very bizarre MRC dataset
+
+rel_idxs = {
+            'mrc_concreteness' : (28, 31),
+            'mrc_AoA' : (40, 43),
+            }
+
+norms = {k : dict() for k in rel_idxs.keys()}
+to_be_corrected = {
+                   'harbour' : 'harbor',
+                   'neighbourhood' : 'neighborhood',
+                   'vapour' : 'vapor',
+                   'rumour' : 'rumor',
+                   'doughnut' : 'donut',
+                   'neighbour' : 'neighbor',
+                   'humour' : 'humor',
+                   'demeanour' : 'demeanor',
+                   'flavour' : 'flavor',
+                   'pretence' : 'pretense',
+                   'odour' : 'odor',
+                   'discolouration' : 'discoloration',
+                   'axe' : 'ax',
+                   'judgement' : 'judgment',
+                   }
+
+with open(os.path.join('norms', 'mrc2.dct')) as i:
+    for l in i:
+        word = l[51:].split('|')[0].lower()
+        if word in to_be_corrected.keys():
+            word = to_be_corrected[word]
+        for var, idxs in rel_idxs.items():
+            val = int(l[idxs[0]:idxs[1]])
+            if val != 0:
+                norms[var][word] = val
+
 ### all
 all_values = {
-              'matches' : dict(), 
+              'matches' : dict(),
               'mismatches' : dict(),
               }
 
 ### read norms
 
 folder = 'norms'
-assert len(os.listdir(folder)) == 4
-norms = dict()
+assert len(os.listdir(folder)) == 5
 associations = dict()
 pos = dict()
 
@@ -38,9 +73,11 @@ for f in os.listdir(folder):
     elif 'strength' in f:
         keys = ['associative_strength']
         all_rel_idxs = [[0, 1, -1]]
-    
+    else:
+        continue
+
     for key, rel_idxs in zip(keys, all_rel_idxs):
-    
+
         norms[key] = dict()
         with open(os.path.join(folder, f), errors='ignore') as i:
             for l in i:
@@ -90,12 +127,17 @@ for f in os.listdir(folder):
             #        print(line[idx])
             couples_dict[key].append([line[rel_idxs[0]], line[rel_idxs[1]], float(line[rel_idxs[2]])])
 words_total = set([w for lst in couples_dict.values() for case in lst for w in case[:2]])
+missing_words = [w for w in words_total if w not in norms['mrc_AoA']]
 words_per_cat = {k : set([w for case in lst for w in case[:2]]) for k, lst in couples_dict.items()}
 
 ### loading w2v
 wv = gensim.downloader.load('word2vec-google-news-300')
 
 ### printouts!
+r_dataset = {k : dict() for k in norms.keys()}
+r_dataset['w2v_distance'] = dict()
+r_dataset['wordnet_distance'] = dict()
+r_dataset['difference_wordnet_senses'] = dict()
 
 print('\n')
 print('total words: {}'.format(len(words_total)))
@@ -114,8 +156,10 @@ for k, tuples in couples_dict.items():
         values = list()
         for tup in tuples:
             if tup[0] in missing_words or tup[1] in missing_words:
-                continue 
+                r_dataset[key][tuple(tup[:2])] = 'na'
+                continue
             diff = abs(current_variable[tup[0]]-current_variable[tup[1]])
+            r_dataset[key][tuple(tup[:2])] = diff
             values.append(diff)
         print('avg difference in {} for {}: {}'.format(key, k, numpy.average(values)))
         print('std of differences in {} for {}: {}'.format(key, k, numpy.std(values)))
@@ -124,35 +168,57 @@ for k, tuples in couples_dict.items():
     ### w2v
     print('\n')
     w2v_sims = [wv.similarity(tup[0], tup[1]) for tup in tuples]
+    for t, s in zip(tuples, w2v_sims):
+        r_dataset['w2v_distance'][(t[0], t[1])] = 1-s
     print('avg w2v similarity for {}: {}'.format(k, numpy.average(w2v_sims)))
     all_values[k]['word2vec_distance'] = [1-s for s in w2v_sims]
     print('std of w2v similarity for {}: {}'.format(k, numpy.std(w2v_sims)))
     ### associations
-    assos = [associations[tuple(tup[:2])] for tup in tuples if tuple(tup[:2]) in associations.keys()]
+    #r_dataset['word_association_distance'] = dict()
+    assos = list()
+    missing_tuples = list()
+    for tup in tuples:
+        t = tuple(tup[:2])
+        if t not in associations.keys():
+            missing_tuples.append(t)
+            #r_dataset['word_association_distance'][t] = 'na'
+        else:
+            asso = associations[t]
+            #r_dataset['word_association_distance'][t] = 1-asso
+            assos.append(asso)
+    print('missing tuples for word associations: {}'.format(len(missing_tuples)))
     print('avg word association for {}: {}'.format(k, numpy.average(assos)))
     all_values[k]['word_association_distance'] = [1-s for s in assos]
     print('std of word association for {}: {}'.format(k, numpy.std(assos)))
-    
+
     ### wordnet
     wn_sims = list()
     diff_senses = list()
     print('\n')
+    counter = 0
     for tup in tuples:
-        if tup[0] in missing_words or tup[1] in missing_words:
-            continue 
+        counter += 1
+        t = tuple(tup[:2])
+        #if tup[0] in missing_words or tup[1] in missing_words:
+        #    continue
         words = list()
         tup_sims = list()
-        for w in tup[:2]:
+        for w in t:
             #current_pos = pos[w]
             w_syn = wordnet.synsets(w)
             words.append(w_syn)
-        diff_senses.append(abs(len(words[0])-len(words[1])))
+        senses = abs(len(words[0])-len(words[1]))
+        r_dataset['difference_wordnet_senses'][t] = senses
+        diff_senses.append(senses)
         combs = list(itertools.product(words[0], words[1]))
         for c in combs:
             #sim = wordnet.path_similarity(c[0], c[1])
             sim = wordnet.wup_similarity(c[0], c[1])
             tup_sims.append(sim)
-        wn_sims.append(numpy.average(tup_sims))
+        avg_sims = numpy.average(tup_sims)
+        wn_sims.append(avg_sims)
+        r_dataset['wordnet_distance'][t] = 1-avg_sims
+    print(counter)
     all_values[k]['wordnet_distance'] = [1-s for s in wn_sims]
     all_values[k]['difference_in number_of wordnet_senses'] = diff_senses
     print('avg wordnet similarity for {}: {}'.format(k, numpy.average(wn_sims)))
@@ -169,6 +235,7 @@ for k, v in all_values.items():
     for k_two, v_two in v.items():
         vals = [(score - parameters[k_two][0])/parameters[k_two][1] for score in v_two]
         z_scores[k][k_two] = vals
+
 ### now plotting
 plot_folder = 'plots'
 os.makedirs(plot_folder, exist_ok=True)
@@ -181,11 +248,11 @@ assert [v[0] for v in matched] == [v[0] for v in mismatched]
 xs = [v[0] for v in matched]
 matched = [v[1] for v in matched]
 mismatched = [v[1] for v in mismatched]
-v1 = ax.violinplot(matched, 
-                       #points=100, 
+v1 = ax.violinplot(matched,
+                       #points=100,
                        positions=range(len(xs)),
-                       showmeans=True, 
-                       showextrema=False, 
+                       showmeans=True,
+                       showextrema=False,
                        showmedians=False,
                        )
 for b in v1['bodies']:
@@ -195,11 +262,11 @@ for b in v1['bodies']:
     b.get_paths()[0].vertices[:, 0] = numpy.clip(b.get_paths()[0].vertices[:, 0], -numpy.inf, m)
     b.set_color('darkorange')
 v1['cmeans'].set_color('darkorange')
-v2 = ax.violinplot(mismatched, 
-                       #points=100, 
+v2 = ax.violinplot(mismatched,
+                       #points=100,
                        positions=range(len(xs)),
-                       showmeans=True, 
-                       showextrema=False, 
+                       showmeans=True,
+                       showextrema=False,
                        showmedians=False,
                        )
 for b in v2['bodies']:
@@ -216,14 +283,14 @@ ax.legend(
           )
 ax.set_xticks(range(len(xs)))
 ax.set_xticklabels(
-                    [x.replace('_', '\n') for x in xs], 
-                    fontsize=23, 
+                    [x.replace('_', '\n') for x in xs],
+                    fontsize=23,
                     fontweight='bold',
                     )
 pyplot.yticks(fontsize=15)
 ax.set_ylabel(
-              'Standardized value', 
-              fontsize=20, 
+              'Standardized value',
+              fontsize=20,
               fontweight='bold',
               labelpad=20
               )
@@ -234,3 +301,28 @@ ax.set_title(
              fontsize=25,
              )
 pyplot.savefig(out_file)
+
+### preparing r dataset
+with open('r_data.tsv', 'w') as o:
+    o.write('label\tconcreteness_difference\tcd_distance\tw2v_distance\twordnet_distance\n')
+    for label, tuples in couples_dict.items():
+        if label == 'matches':
+            label = -1
+        else:
+            label = +1
+        for tup in tuples:
+            #print(tup)
+            t = tuple(tup[:2])
+            conc = r_dataset['mrc_concreteness'][t]
+            #conc = r_dataset['concreteness'][t]
+            #aoa = r_dataset['mrc_AoA'][t]
+            w2v = r_dataset['w2v_distance'][t]
+            wordnet = r_dataset['wordnet_distance'][t]
+            cd = r_dataset['log10_contextual_diversity'][t]
+            line = [label, conc, cd, w2v, wordnet]
+            #print(line)
+            #assert 'na' not in line
+            if 'na' not in line:
+                #print(line)
+                o.write('\t'.join([str(v) for v in line]))
+                o.write('\n')
