@@ -304,22 +304,24 @@ pyplot.savefig(out_file)
 
 ### preparing r dataset
 with open('r_data.tsv', 'w') as o:
-    o.write('label\tconcreteness_difference\tcd_distance\tw2v_distance\twordnet_distance\n')
+    o.write('label\taoa\tconcreteness_difference\tlog10_frequency\tcd_distance\tw2v_distance\twordnet_distance\tsenses\n')
     for label, tuples in couples_dict.items():
         if label == 'matches':
-            label = -1
-        else:
             label = +1
+        else:
+            label = -1
         for tup in tuples:
             #print(tup)
             t = tuple(tup[:2])
             conc = r_dataset['mrc_concreteness'][t]
             #conc = r_dataset['concreteness'][t]
-            #aoa = r_dataset['mrc_AoA'][t]
+            aoa = r_dataset['mrc_AoA'][t]
             w2v = r_dataset['w2v_distance'][t]
             wordnet = r_dataset['wordnet_distance'][t]
+            senses = r_dataset['difference_wordnet_senses'][t]
             cd = r_dataset['log10_contextual_diversity'][t]
-            line = [label, conc, cd, w2v, wordnet]
+            freq = r_dataset['log10_freq'][t]
+            line = [label, aoa, conc, freq, cd, w2v, wordnet, senses]
             #print(line)
             #assert 'na' not in line
             if 'na' not in line:
