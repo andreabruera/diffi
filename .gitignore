@@ -1,6 +1,7 @@
 norms/
 german_norms/
 fasttext/
+models/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
