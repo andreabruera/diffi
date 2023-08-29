@@ -1,12 +1,24 @@
 import gensim
+import nltk
 import numpy
 import os
 import random
 import scipy
+import sklearn
 
 from gensim.models import Word2Vec
 from scipy import spatial
+from sklearn import metrics
 from tqdm import tqdm
+from nltk.corpus import wordnet
+
+def cosine_similarity(vec_one, vec_two):
+    num = sum([a*b for a, b in zip(vec_one, vec_two)])
+    den_one = sum([a**2 for a in vec_one])**.5
+    den_two = sum([a**2 for a in vec_two])**.5
+    cos = num / (den_one * den_two)
+
+    return cos
 
 ### reading w2v
 w2v = Word2Vec.load(os.path.join(
@@ -26,10 +38,29 @@ with open('german_stimuli_zscored_values.tsv') as i:
             header = line[1:]
             counter += 1
             continue
+        #if 'nan' not in line:
         if 'nan' not in line and line[0] in w2v.wv.key_to_index.keys():
             if line[0].capitalize() == line[0]:
                 stimuli[line[0]] = numpy.array(line[1:], dtype=numpy.float32)
                 assert stimuli[line[0]].shape == (len(header), )
+
+'''
+import googletrans
+
+from googletrans import Translator, constants
+
+translations = {k : '' for k in stimuli.keys()}
+translator = Translator(service_urls=['translate.googleapis.com'])
+
+for k in stimuli.keys():
+    translation = translator.translate(k, src='de', dest="en").text
+    translations[k] = translation.lower()
+
+with open('stimuli_translations.tsv', 'w') as o:
+    for k, v in translations.items():
+        o.write('{}\t{}\n'.format(k, v))
+'''
+
 
 ### then we compute the word difficulty
 ### length + aoa + old20 - log10_freq_opensubs - log10_freq_sdewac - concreteness
@@ -54,7 +85,7 @@ for w in easiness_scores.keys():
     w2v_vectors[w] = w2v.wv[w]
 
 ### computing avg sim per word
-avg_sims = {k_one : numpy.average([scipy.spatial.distance.cosine(v_one, v_two) for k_two, v_two in w2v_vectors.items()]) for k_one, v_one in w2v_vectors.items()}
+#avg_sims = {k_one : numpy.average([sklearn.metrics.pairwise.cosine_similarity(v_one.reshape(1, -1), v_two.reshape(1, -1))[0][0] for k_two, v_two in w2v_vectors.items()]) for k_one, v_one in w2v_vectors.items()}
 
 matches = dict()
 mismatches = dict()
@@ -64,12 +95,16 @@ for k_one, v_one in tqdm(w2v_vectors.items()):
     for k_two, v_two in w2v_vectors.items():
         if k_one == k_two:
             continue
-        w2v_sim = scipy.spatial.distance.cosine(v_one, v_two) / (avg_sims[k_one]*avg_sims[k_two])
+        #w2v_sim = cosine_similarity(v_one, v_two) / (avg_sims[k_one]*avg_sims[k_two])
+        #w2v_sim = cosine_similarity(v_one, v_two)
+        #w2v_sim = sklearn.metrics.pairwise.cosine_similarity(v_one.reshape(1, -1), v_two.reshape(1, -1))[0][0]/ (avg_sims[k_one]*avg_sims[k_two])
+        w2v_sim = sklearn.metrics.pairwise.cosine_similarity(v_one.reshape(1, -1), v_two.reshape(1, -1))[0][0]
         conc_sim = abs(conc_scores[k_one]-conc_scores[k_two])
-        easiness_w[k_two] = w2v_sim - 0.5*conc_sim + 0.25*easiness_scores[k_one] + 0.25*easiness_scores[k_two]
+        easiness_w[k_two] = w2v_sim - conc_sim
+        #+ .5*easiness_scores[k_one] + 0.5*easiness_scores[k_two]
     sorted_comb_ease_w = sorted(easiness_w.items(), key=lambda item : item[1])
-    match_index = random.choice(range(-10, 0))
-    mismatch_index = random.choice(range(0, 10))
+    match_index = random.choice(range(-5, 0))
+    mismatch_index = random.choice(range(0, 5))
     matches[tuple(sorted([k_one, sorted_comb_ease_w[match_index][0]]))] = sorted_comb_ease_w[match_index][1]
     mismatches[tuple(sorted([k_one, sorted_comb_ease_w[mismatch_index][0]]))] = sorted_comb_ease_w[mismatch_index][1]
 
