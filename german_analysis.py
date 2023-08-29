@@ -1,22 +1,18 @@
+import gensim
 import numpy
 import os
 import scipy
 
+from gensim.models import Word2Vec
 from scipy import spatial
 
 ### reading w2v
-print('now reading w2v...')
-w2v = dict()
-with open(os.path.join('models', 'dewac_cbow.txt'), encoding='utf-8') as i:
-    for l in i:
-        line = l.strip().split()
-        word = line[0][1:-1]
-        vector = numpy.array(line[1:], dtype=numpy.float64)
-        print(line)
-        assert vector.shape == (400, )
-        w2v[word] = vector
-print('loaded!')
-import pdb; pdb.set_trace()
+w2v = Word2Vec.load(os.path.join(
+                         'models',
+                         'word2vec_de_opensubs_sdewac_param-mandera2017',
+                         'word2vec_de_opensubs_sdewac_param-mandera2017.model',
+                         )
+                    )
 
 ### reading 2011 dataset
 indices = {
@@ -43,9 +39,9 @@ for year, mapper in indices.items():
             delimiter=';'
         else:
             header_len = 1
-            delimiter=','
+            delimiter='\t'
         counter = 0
-        with open(os.path.join('german_norms', f), encoding='latin-1') as i:
+        with open(os.path.join('german_norms', f), encoding='utf-8') as i:
             for l in i:
                 if counter < header_len:
                     counter += 1
@@ -64,6 +60,9 @@ word_values = {k : list() for k in dataset['word']}
 for k, v in zip(dataset['word'], dataset['aoa']):
     word_values[k].append(v)
 for k, v in word_values.items():
-    word_values[k] = [numpy.average(v)]
-    if k.lower() not in w2v.keys():
+    try:
+        assert k in w2v.wv.key_to_index.keys()
+    except AssertionError:
         print(k)
+    word_values[k] = [numpy.average(v)]
+import pdb; pdb.set_trace()
