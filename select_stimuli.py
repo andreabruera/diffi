@@ -76,49 +76,177 @@ easiness_scores = dict()
 for k, v in stimuli.items():
     easiness_scores[k] = -numpy.sum(v*formula_vector)
 
-sorted_ease = sorted(easiness_scores.items(), key=lambda item : item[1], reverse=True)
+### z-scoring
+mean_easiness = numpy.average(list(easiness_scores.values()))
+std_easiness = numpy.std(list(easiness_scores.values()))
+easiness_scores = {k : (v-mean_easiness) / std_easiness for k, v in easiness_scores.items()}
 
 conc_scores = {k : v[header.index('concreteness')] for k, v in stimuli.items()}
 
-w2v_vectors = dict()
-for w in easiness_scores.keys():
-    w2v_vectors[w] = w2v.wv[w]
 
-### computing avg sim per word
-#avg_sims = {k_one : numpy.average([sklearn.metrics.pairwise.cosine_similarity(v_one.reshape(1, -1), v_two.reshape(1, -1))[0][0] for k_two, v_two in w2v_vectors.items()]) for k_one, v_one in w2v_vectors.items()}
+w2v_similarities_file = os.path.join('models', 'w2v_similarities.tsv')
+if os.path.exists(w2v_similarities_file):
+    w2v_sims = dict()
+    with open(w2v_similarities_file) as i:
+        counter = 0
+        for l in i:
+            if counter == 0:
+                counter += 1
+                continue
+            line = l.strip().split('\t')
+            assert len(line) == 3
+            w2v_sims[(line[0], line[1])] = float(line[2])
+else:
+    w2v_vectors = dict()
+    for w in easiness_scores.keys():
+        w2v_vectors[w] = w2v.wv[w]
+    w2v_sims = dict()
+    for k_one, v_one in tqdm(w2v_vectors.items()):
+        for k_two, v_two in w2v_vectors.items():
+            if k_one == k_two:
+                continue
+            key = tuple(sorted([k_one, k_two]))
+            if key in w2v_sims.keys():
+                continue
+            w2v_sim = sklearn.metrics.pairwise.cosine_similarity(v_one.reshape(1, -1), v_two.reshape(1, -1))[0][0]
+            w2v_sims[key] = w2v_sim
+    with open(w2v_similarities_file, 'w') as o:
+        o.write('word_one\tword_two\tw2v_similarity\n')
+        for k, v in w2v_sims.items():
+            o.write('{}\t{}\t{}\n'.format(k[0], k[1], float(v)))
 
 matches = dict()
 mismatches = dict()
 
-for k_one, v_one in tqdm(w2v_vectors.items()):
+mismatch_counter = {w : 0 for w in stimuli.keys()}
+
+merged_similarities = dict()
+
+for k, v in w2v_sims.items():
+    k_one = k[0]
+    k_two = k[1]
+    conc_sim = abs(conc_scores[k_one]-conc_scores[k_two])
+    sim_score = v - conc_sim
+    merged_similarities[k] = sim_score
+
+### for each word, selecting 2 best / worst similarities
+
+for k_one in stimuli.keys():
     easiness_w = dict()
-    for k_two, v_two in w2v_vectors.items():
+    for k_two in stimuli.keys():
         if k_one == k_two:
             continue
-        #w2v_sim = cosine_similarity(v_one, v_two) / (avg_sims[k_one]*avg_sims[k_two])
-        #w2v_sim = cosine_similarity(v_one, v_two)
-        #w2v_sim = sklearn.metrics.pairwise.cosine_similarity(v_one.reshape(1, -1), v_two.reshape(1, -1))[0][0]/ (avg_sims[k_one]*avg_sims[k_two])
-        w2v_sim = sklearn.metrics.pairwise.cosine_similarity(v_one.reshape(1, -1), v_two.reshape(1, -1))[0][0]
-        conc_sim = abs(conc_scores[k_one]-conc_scores[k_two])
-        easiness_w[k_two] = w2v_sim - conc_sim
-        #+ .5*easiness_scores[k_one] + 0.5*easiness_scores[k_two]
+
+        easiness_w[k_two] = merged_similarities[tuple(sorted([k_one, k_two]))]
+    ### matches
     sorted_comb_ease_w = sorted(easiness_w.items(), key=lambda item : item[1])
-    #match_index = random.choice(range(-4, 0))
-    #mismatch_index = random.choice(range(0, 4))
     match_indices = random.sample(range(-4, 0), k=2)
+    ### mismatches
+    sorted_comb_ease_w = sorted([(k, v) for k, v in easiness_w.items() if mismatch_counter[k]<3], key=lambda item : item[1])
     mismatch_indices = random.sample(range(0, 4), k=2)
     for match_index, mismatch_index in zip(match_indices, mismatch_indices):
-        matches[tuple(sorted([k_one, sorted_comb_ease_w[match_index][0]]))] = sorted_comb_ease_w[match_index][1]
-        mismatches[tuple(sorted([k_one, sorted_comb_ease_w[mismatch_index][0]]))] = sorted_comb_ease_w[mismatch_index][1]
+        match_word = sorted_comb_ease_w[match_index][0]
+        matches[tuple(sorted([k_one, match_word]))] = sorted_comb_ease_w[match_index][1]
+        mismatch_word = sorted_comb_ease_w[mismatch_index][0]
+        mismatch_counter[mismatch_word] += 1
+        mismatches[tuple(sorted([k_one, mismatch_word]))] = sorted_comb_ease_w[mismatch_index][1]
 
-matches = {k : v for k, v in sorted(matches.items(), key=lambda item : item[1], reverse=True)}
-mismatches = {k : v for k, v in sorted(mismatches.items(), key=lambda item : item[1], reverse=True)}
+### matches - maximum number of repetitions: 5 (replication of the stimuli by Wilson et al. 2018)
+matches_counter = {w : 0 for w in stimuli.keys()}
+for w_one, w_two in matches.keys():
+    matches_counter[w_one] += 1
+    matches_counter[w_two] += 1
+for w, count in matches_counter.items():
+    if count > 5:
+        check_counter = {w : 0 for w in stimuli.keys()}
+        for w_one, w_two in matches.keys():
+            check_counter[w_one] += 1
+            check_counter[w_two] += 1
+        if check_counter[w] < 5:
+            continue
+        to_be_checked = [(k, v) for k, v in matches.items() if w in k]
+        to_be_removed = sorted(to_be_checked, key = lambda item : item[1])[:-5]
+        assert len(to_be_checked) - len(to_be_removed) == 5
+        for k in to_be_removed:
+            del matches[k[0]]
+matches_counter = {w : 0 for w in stimuli.keys()}
+for w_one, w_two in matches.keys():
+    matches_counter[w_one] += 1
+    matches_counter[w_two] += 1
+assert max(list(matches_counter.values())) == 5
 
-with open('automatic_matches.tsv', 'w') as o:
-    o.write('word_one\teasiness_one\tword_two\teasiness_two\trelatedness_judgment_easiness\n')
-    for k, v in matches.items():
-        o.write('{}\t{}\t{}\t{}\t{}\n'.format(k[0], easiness_scores[k[0]], k[1], easiness_scores[k[1]], v))
-with open('automatic_mismatches.tsv', 'w') as o:
-    o.write('word_one\teasiness_one\tword_two\teasiness_two\trelatedness_judgment_easiness\n')
-    for k, v in mismatches.items():
-        o.write('{}\t{}\t{}\t{}\t{}\n'.format(k[0], easiness_scores[k[0]], k[1], easiness_scores[k[1]], v))
+### mismatches - maximum number of repetitions: 5
+mismatches_counter = {w : 0 for w in stimuli.keys()}
+for w_one, w_two in mismatches.keys():
+    mismatches_counter[w_one] += 1
+    mismatches_counter[w_two] += 1
+assert max(list(mismatches_counter.values())) == 5
+
+matches = {k : v for k,v in sorted(matches.items(), key=lambda item : item[1], reverse=True)[:2700]}
+mismatches = {k : v for k,v in sorted(mismatches.items(), key=lambda item : item[1])[:2700]}
+
+### z-scoring
+mean_sims = numpy.average(list(matches.values())+list(mismatches.values()))
+std_sims = numpy.std(list(matches.values())+list(mismatches.values()))
+matches = {k : (v-mean_sims) / std_sims for k, v in matches.items()}
+mismatches = {k : (v-mean_sims) / std_sims for k, v in mismatches.items()}
+
+### matches are sorted from higher to lower
+final_matches = {k : (v, v+0.25*easiness_scores[k[0]]+.25*easiness_scores[k[1]]) for k, v in matches.items()}
+final_matches = {k : v for k, v in sorted(final_matches.items(), key=lambda item : item[1][1], reverse=True)}
+### mismatches are sorted from lower to higher
+final_mismatches = {k : (v, -v+.25*easiness_scores[k[0]]+.25*easiness_scores[k[1]]) for k, v in mismatches.items()}
+final_mismatches = {k : v for k, v in sorted(final_mismatches.items(), key=lambda item : item[1][1], reverse=True)}
+
+output_folder = 'selected_stimuli'
+os.makedirs(output_folder, exist_ok=True)
+
+backup_matches = list()
+backup_mismatches = list()
+
+with open(os.path.join(output_folder, 'automatic_matches.tsv'), 'w') as o:
+    intro = 'word_one\teasiness_word_one\tword_two\teasiness_word_two\teasiness_both_words\tdifficulty_category\n'
+    o.write(intro)
+    backup_matches.append(intro)
+    category_counter = 1
+    line_counter = 0
+    backup_counter = 0
+    for k, v in final_matches.items():
+        line = '{}\t{}\t{}\t{}\t{}\t{}\n'.format(k[0], easiness_scores[k[0]], k[1], easiness_scores[k[1]], v[1], category_counter)
+        if line_counter <= 300:
+            line_counter += 1
+            o.write(line)
+        elif backup_counter < 100:
+            backup_counter += 1
+            backup_matches.append(line)
+        else:
+            category_counter += 1
+            backup_counter = 0
+            line_counter = 1
+            o.write(line)
+with open(os.path.join(output_folder, 'automatic_mismatches.tsv'), 'w') as o:
+    intro = 'word_one\teasiness_word_one\tword_two\teasiness_word_two\teasiness_both_words\tdifficulty_category\n'
+    o.write(intro)
+    backup_mismatches.append(intro)
+    category_counter = 1
+    line_counter = 0
+    backup_counter = 0
+    for k, v in final_mismatches.items():
+        line = '{}\t{}\t{}\t{}\t{}\t{}\n'.format(k[0], easiness_scores[k[0]], k[1], easiness_scores[k[1]], v[1], category_counter)
+        if line_counter <= 300:
+            line_counter += 1
+            o.write(line)
+        elif backup_counter < 100:
+            backup_counter += 1
+            backup_mismatches.append(line)
+        else:
+            category_counter += 1
+            backup_counter = 0
+            line_counter = 1
+            o.write(line)
+with open(os.path.join(output_folder, 'backup_automatic_matches.tsv'), 'w') as o:
+    for l in backup_matches:
+        o.write(l)
+with open(os.path.join(output_folder, 'backup_automatic_mismatches.tsv'), 'w') as o:
+    for l in backup_mismatches:
+        o.write(l)
