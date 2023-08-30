@@ -103,10 +103,13 @@ for k_one, v_one in tqdm(w2v_vectors.items()):
         easiness_w[k_two] = w2v_sim - conc_sim
         #+ .5*easiness_scores[k_one] + 0.5*easiness_scores[k_two]
     sorted_comb_ease_w = sorted(easiness_w.items(), key=lambda item : item[1])
-    match_index = random.choice(range(-5, 0))
-    mismatch_index = random.choice(range(0, 5))
-    matches[tuple(sorted([k_one, sorted_comb_ease_w[match_index][0]]))] = sorted_comb_ease_w[match_index][1]
-    mismatches[tuple(sorted([k_one, sorted_comb_ease_w[mismatch_index][0]]))] = sorted_comb_ease_w[mismatch_index][1]
+    #match_index = random.choice(range(-4, 0))
+    #mismatch_index = random.choice(range(0, 4))
+    match_indices = random.sample(range(-4, 0), k=2)
+    mismatch_indices = random.sample(range(0, 4), k=2)
+    for match_index, mismatch_index in zip(match_indices, mismatch_indices):
+        matches[tuple(sorted([k_one, sorted_comb_ease_w[match_index][0]]))] = sorted_comb_ease_w[match_index][1]
+        mismatches[tuple(sorted([k_one, sorted_comb_ease_w[mismatch_index][0]]))] = sorted_comb_ease_w[mismatch_index][1]
 
 matches = {k : v for k, v in sorted(matches.items(), key=lambda item : item[1], reverse=True)}
 mismatches = {k : v for k, v in sorted(mismatches.items(), key=lambda item : item[1], reverse=True)}
