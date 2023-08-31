@@ -12,6 +12,31 @@ from sklearn import metrics
 from tqdm import tqdm
 from nltk.corpus import wordnet
 
+def levenshtein(seq1, seq2):
+    size_x = len(seq1) + 1
+    size_y = len(seq2) + 1
+    matrix = numpy.zeros((size_x, size_y))
+    for x in range(size_x):
+        matrix [x, 0] = x
+    for y in range(size_y):
+        matrix [0, y] = y
+
+    for x in range(1, size_x):
+        for y in range(1, size_y):
+            if seq1[x-1] == seq2[y-1]:
+                matrix [x,y] = min(
+                    matrix[x-1, y] + 1,
+                    matrix[x-1, y-1],
+                    matrix[x, y-1] + 1
+                )
+            else:
+                matrix [x,y] = min(
+                    matrix[x-1,y] + 1,
+                    matrix[x-1,y-1] + 1,
+                    matrix[x,y-1] + 1
+                )
+    return (matrix[size_x - 1, size_y - 1])
+
 def cosine_similarity(vec_one, vec_two):
     num = sum([a*b for a, b in zip(vec_one, vec_two)])
     den_one = sum([a**2 for a in vec_one])**.5
@@ -83,7 +108,6 @@ easiness_scores = {k : (v-mean_easiness) / std_easiness for k, v in easiness_sco
 
 conc_scores = {k : v[header.index('concreteness')] for k, v in stimuli.items()}
 
-
 w2v_similarities_file = os.path.join('models', 'w2v_similarities.tsv')
 if os.path.exists(w2v_similarities_file):
     w2v_sims = dict()
@@ -114,6 +138,12 @@ else:
         o.write('word_one\tword_two\tw2v_similarity\n')
         for k, v in w2v_sims.items():
             o.write('{}\t{}\t{}\n'.format(k[0], k[1], float(v)))
+
+lev_sims = {k : levenshtein(k[0], k[1]) for k in w2v_sims.keys()}
+### z-scoring
+mean_lev = numpy.average(list(lev_sims.values()))
+std_lev = numpy.std(list(lev_sims.values()))
+lev_sims = {k : (v-mean_lev) / std_lev for k, v in lev_sims.items()}
 
 matches = dict()
 mismatches = dict()
@@ -192,10 +222,10 @@ matches = {k : (v-mean_sims) / std_sims for k, v in matches.items()}
 mismatches = {k : (v-mean_sims) / std_sims for k, v in mismatches.items()}
 
 ### matches are sorted from higher to lower
-final_matches = {k : (v, v+0.25*easiness_scores[k[0]]+.25*easiness_scores[k[1]]) for k, v in matches.items()}
+final_matches = {k : (v, v+0.25*easiness_scores[k[0]]+.25*easiness_scores[k[1]]-lev_sims[k]) for k, v in matches.items()}
 final_matches = {k : v for k, v in sorted(final_matches.items(), key=lambda item : item[1][1], reverse=True)}
 ### mismatches are sorted from lower to higher
-final_mismatches = {k : (v, -v+.25*easiness_scores[k[0]]+.25*easiness_scores[k[1]]) for k, v in mismatches.items()}
+final_mismatches = {k : (v, -v+.25*easiness_scores[k[0]]+.25*easiness_scores[k[1]]-lev_sims[k]) for k, v in mismatches.items()}
 final_mismatches = {k : v for k, v in sorted(final_mismatches.items(), key=lambda item : item[1][1], reverse=True)}
 
 output_folder = 'selected_stimuli'
