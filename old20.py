@@ -38,6 +38,7 @@ def multiprocessing_levenshtein(inputs):
         levs.append(levenshtein(w, w_two))
     return (w, levs)
 
+'''
 ### reading 2011 dataset
 indices = {
            '_2011_' :
@@ -78,6 +79,24 @@ for year, mapper in indices.items():
 
 relevant_words = list(set(dataset['word']))
 #print(relevant_words)
+### reading phil's dataset
+relevant_words = list()
+with open(os.path.join('data', 'phil_clean.tsv')) as i:
+    for l_i, l in enumerate(i):
+        line = l.strip().split('\t')
+        if l_i==0:
+            rel_idx = line.index('Words')
+            continue
+        relevant_words.append(line[rel_idx])
+'''
+### reading phil's candidate dataset
+relevant_words = list()
+with open(os.path.join('data', 'german_nouns_phil.tsv')) as i:
+    for l_i, l in enumerate(i):
+        line = l.strip().split('\t')
+        if l_i==0:
+            continue
+        relevant_words.append(line[0])
 
 with open(os.path.join('pickles', 'sdewac_lemma_freqs.pkl'), 'rb') as i:
     all_sdewac_freqs = pickle.load(i)
@@ -95,10 +114,11 @@ old20_scores = {w : 0 for w in relevant_words}
 for w in tqdm(relevant_words):
     _, lev_vals = multiprocessing_levenshtein([w, other_words])
     score = numpy.average(sorted(lev_vals, reverse=True)[:20])
-    print([w, score])
+    #print([w, score])
     old20_scores[w] = score
 
-with open('old20_scores.tsv', 'w') as o:
+#with open('old20_scores.tsv', 'w') as o:
+with open('old20_scores_candidate_nouns_phil.tsv', 'w') as o:
     o.write('word\told20 score (based on the top {} lemmas in sdewac)\n'.format(max_n))
     for k, v in old20_scores.items():
         o.write('{}\t{}\n'.format(k, v))

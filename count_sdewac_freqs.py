@@ -10,6 +10,8 @@ def read_dewac(file_path):
         sentence = {
                     'word' : list(), 
                     'lemma' : list(),
+                    'lemma_pos' : list(),
+                    'word_pos' : list(),
                     }
         for l in i:
             line = l.strip().split('\t')
@@ -24,6 +26,8 @@ def read_dewac(file_path):
                 sentence = {
                     'word' : list(), 
                     'lemma' : list(),
+                    'lemma_pos' : list(),
+                    'word_pos' : list(),
                     }
             if len(line) < 2:
                 continue
@@ -33,13 +37,21 @@ def read_dewac(file_path):
                 else:
                     sentence['word'].append(line[0])
                     sentence['lemma'].append(line[2])
+                    sentence['lemma_pos'].append(line[1])
+                    sentence['word_pos'].append(line[1])
 
 def counter(file_path):
     word_counter = dict()
+    word_pos_counter = dict()
     lemma_counter = dict()
+    lemma_pos_counter = dict()
     with tqdm() as counter:
         for sentence in read_dewac(file_path):
-            for word, lemma in zip(sentence['word'], sentence['lemma']):
+            for word, lemma, word_pos, lemma_pos in zip(
+                                                        sentence['word'], 
+                                                        sentence['lemma'], 
+                                                        sentence['word_pos'], 
+                                                        sentence['lemma_pos']):
                 ### words
                 try:
                     word_counter[word] += 1
@@ -50,8 +62,18 @@ def counter(file_path):
                     lemma_counter[lemma] += 1
                 except KeyError:
                     lemma_counter[lemma] = 1
+                ### lemma pos
+                try:
+                    lemma_pos_counter['{}_{}'.format(lemma, lemma_pos)] += 1
+                except KeyError:
+                    lemma_pos_counter['{}_{}'.format(lemma, lemma_pos)] = 1
+                ### word pos
+                try:
+                    word_pos_counter['{}_{}'.format(word, word_pos)] += 1
+                except KeyError:
+                    word_pos_counter['{}_{}'.format(word, word_pos)] = 1
                 counter.update(1)
-    return word_counter, lemma_counter
+    return word_counter, lemma_counter, word_pos_counter, lemma_pos_counter
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -79,6 +101,8 @@ os.makedirs(pkls, exist_ok=True)
 
 word_freqs_file = os.path.join(pkls, 'sdewac_word_freqs.pkl')
 lemma_freqs_file = os.path.join(pkls, 'sdewac_lemma_freqs.pkl')
+word_pos_freqs_file = os.path.join(pkls, 'sdewac_word_pos_freqs.pkl')
+lemma_pos_freqs_file = os.path.join(pkls, 'sdewac_lemma_pos_freqs.pkl')
 if os.path.exists(word_freqs_file):
     with open(word_freqs_file, 'rb') as i:
         print('loading word freqs')
@@ -98,7 +122,9 @@ else:
 
     ### Reorganizing results
     word_freqs = dict()
+    word_pos_freqs = dict()
     lemma_freqs = dict()
+    lemma_pos_freqs = dict()
     for freq_dict in results:
         ### words
         for k, v in freq_dict[0].items():
@@ -106,15 +132,42 @@ else:
                 word_freqs[k] += v
             except KeyError:
                 word_freqs[k] = v
+                word_pos_freqs[k] = dict()
         ### lemmas
         for k, v in freq_dict[1].items():
             try:
                 lemma_freqs[k] += v
             except KeyError:
                 lemma_freqs[k] = v
+                lemma_pos_freqs[k] = dict()
+        ### word pos
+        for k, v in freq_dict[2].items():
+            if '_' not in k:
+                print(k)
+                continue
+            w = k.split('_')[0]
+            p = k.split('_')[1]
+            try:
+                word_pos_freqs[w][p] += 1
+            except KeyError:
+                word_pos_freqs[w][p] = 1
+        ### lemmas
+        for k, v in freq_dict[3].items():
+            if '_' not in k:
+                print(k)
+                continue
+            w = k.split('_')[0]
+            p = k.split('_')[1]
+            try:
+                lemma_pos_freqs[w][p] += 1
+            except KeyError:
+                lemma_pos_freqs[w][p] = 1
 
     with open(word_freqs_file, 'wb') as o:
         pickle.dump(word_freqs, o)
     with open(lemma_freqs_file, 'wb') as o:
         pickle.dump(lemma_freqs, o)
-import pdb; pdb.set_trace()
+    with open(word_pos_freqs_file, 'wb') as o:
+        pickle.dump(word_pos_freqs, o)
+    with open(lemma_pos_freqs_file, 'wb') as o:
+        pickle.dump(lemma_pos_freqs, o)
